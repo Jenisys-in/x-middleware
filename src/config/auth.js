@@ -2,7 +2,7 @@ const crypto = require("crypto");
 const OAuth = require("oauth-1.0a");
 require("dotenv").config();
 
-// Initialize OAuth 1.0a
+// Initialize OAuth 1.0a for X.com API
 const oauth = OAuth({
     consumer: {
         key: process.env.API_KEY,
@@ -29,4 +29,15 @@ const getOAuthHeader = (url, method) => {
     };
 };
 
-module.exports = { getOAuthHeader };
+// ✅ New API Key Authentication Middleware
+const authenticateRequest = (req, res, next) => {
+    const apiKey = req.headers["authorization"];
+
+    if (!apiKey || apiKey !== `Bearer ${process.env.API_KEY}`) {
+        return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    next(); // Continue to the route if authenticated
+};
+
+module.exports = { getOAuthHeader, authenticateRequest };

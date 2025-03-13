@@ -1,7 +1,10 @@
 const axios = require("axios");
-const { getOAuthHeader } = require("../config/auth");
+const { authenticateRequest, getOAuthHeader } = require("../config/auth"); 
 const { BASE_URL, UPLOAD_URL, USER_ID } = require("../config/constants");
 require("dotenv").config();
+
+const fs = require("fs");
+const FormData = require("form-data");
 
 // ✅ Function to Get Tweet Details
 const getTweetDetails = async (tweetId) => {
@@ -36,28 +39,61 @@ const getTweetDetails = async (tweetId) => {
 
 
 
-// ✅ Function to Repost a Tweet
-const repostTweet = async (tweetId) => {
+// ✅ **Fix Retweet Function**
+async function retweet(tweetId) {
     const url = `${BASE_URL}/users/${USER_ID}/retweets`;
     const headers = getOAuthHeader(url, "POST");
 
     try {
-        // ✅ Check if tweet is already retweeted
         const tweetDetails = await getTweetDetails(tweetId);
-        if (tweetDetails.data.retweeted) {
-            console.log("⚠️ Tweet has already been retweeted. Skipping repost.");
-            return { message: "Tweet has already been retweeted. Skipping repost." };
+
+        if (!tweetDetails) {
+            console.error("❌ Tweet details could not be retrieved. Skipping retweet.");
+            return { error: "Tweet not found or API request failed." };
         }
 
-        const response = await axios.post(url, { tweet_id: tweetId }, { headers });
-        console.log("✅ Tweet Reposted Successfully!");
-        return response.data;
-    } catch (error) {
-        console.error("❌ Error Reposting Tweet:", error.response?.data || error.message);
-        throw error;
-    }
-};
+        if (tweetDetails.data.retweeted) {
+            console.log("⚠️ Tweet has already been retweeted. Skipping.");
+            return { message: "Tweet already retweeted." };
+        }
 
+        let attempts = 0;
+        const maxRetries = 2; // ✅ Reduce retries to 2 (instead of 3-5)
+        let delay = 5000; // ✅ Start with a 5-second delay
+
+        while (attempts < maxRetries) {
+            try {
+                const response = await axios.post(url, { tweet_id: tweetId }, { headers });
+
+                if (response.data.errors) {
+                    console.error("❌ Retweet Error:", response.data.errors);
+                    
+                    if (response.data.errors[0].code === 88) {
+                        return { error: "Rate limit exceeded. No more retweets allowed." }; // ✅ Stop retrying
+                    }
+                }
+
+                console.log("✅ Retweet Successful!");
+                return response.data;
+            } catch (error) {
+                if (error.response?.status === 429) {
+                    console.log(`⏳ Rate limit reached. Retrying in ${delay / 1000} seconds...`);
+                    await new Promise((resolve) => setTimeout(resolve, delay));
+                    delay *= 2;
+                    attempts++;
+                } else {
+                    console.error("❌ Retweet Error:", error.response?.data || error.message);
+                    return { error: "Failed to retweet. Possible rate limit issue." };
+                }
+            }
+        }
+
+        return { error: "Too many failed attempts. Retweet blocked by API." };
+    } catch (error) {
+        console.error("❌ Retweet Error:", error.response?.data || error.message);
+        return { error: "Retweet failed. Please try again later." };
+    }
+}
 
 // ✅ Function to Create a New Post
 const createPost = async (text, mediaPath = null) => {
@@ -177,38 +213,42 @@ const checkTweetType = async (tweetId) => {
 };
 
 // ✅ Function to Upload Media
-const fs = require("fs");
-const FormData = require("form-data");
 
-const uploadMedia = async (mediaPath) => {
-    const url = `https://upload.x.com/1.1/media/upload.json`; // ✅ Ensure this is the correct endpoint
-    const headers = getOAuthHeader(url, "POST");
 
+// ✅ **Fix Image Upload Issue**
+async function uploadMedia(imageUrl) {
     try {
+        // ✅ Step 1: Download the image
+        const response = await axios.get(imageUrl, { responseType: "arraybuffer" });
+        const tempFilePath = "./temp_image.jpg";
+
+        // ✅ Step 2: Save the image locally
+        fs.writeFileSync(tempFilePath, response.data);
+
+        // ✅ Step 3: Prepare multipart/form-data request
         const formData = new FormData();
-        formData.append("media", fs.createReadStream(mediaPath));
+        formData.append("media", fs.createReadStream(tempFilePath)); // ✅ Fix: Ensure 'media' parameter is present
 
-        const response = await axios.post(url, formData, {
-            headers: { 
-                ...headers, 
-                ...formData.getHeaders() // Required for multipart form data
-            }
-        });
+        // ✅ Step 4: Set OAuth headers correctly
+        const url = "https://upload.twitter.com/1.1/media/upload.json";
+        const headers = {
+            ...getOAuthHeader(url, "POST"),
+            ...formData.getHeaders(), // ✅ Fix: Include FormData headers
+        };
 
-        console.log("✅ Media Uploaded Successfully!");
+        // ✅ Step 5: Send the media upload request
+        const twitterResponse = await axios.post(url, formData, { headers });
 
-        // ✅ Ensure we return media_id_string (not media_id)
-        const mediaId = response.data.media_id_string;
-        if (!mediaId) {
-            throw new Error("❌ No media_id returned from upload response.");
-        }
+        // ✅ Step 6: Delete temp file after upload
+        fs.unlinkSync(tempFilePath);
 
-        return mediaId; // ✅ Return media_id_string
+        // ✅ Step 7: Return success response
+        return { message: "Media Uploaded Successfully!", media_id: twitterResponse.data.media_id_string };
     } catch (error) {
-        console.error("❌ Error Uploading Media:", error.response?.data || error.message);
-        throw error;
+        console.error("❌ Media Upload Error:", error.response?.data || error.message);
+        return { error: "Media upload failed. Ensure image URL is correct and API tokens are valid." };
     }
-};
+}
 
 
-module.exports = { getTweetDetails, quoteTweet, checkTweetType, uploadMedia, repostTweet, createPost };
+module.exports = { getTweetDetails, quoteTweet, checkTweetType, uploadMedia, retweet, createPost };

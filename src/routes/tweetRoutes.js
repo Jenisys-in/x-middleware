@@ -1,15 +1,20 @@
 const express = require("express");
-const { getTweetDetails, checkTweetType, uploadMedia, repostTweet, createPost, quoteTweet } = require("../services/xService");
-
+const { getTweetDetails, checkTweetType, uploadMedia, retweet, createPost, quoteTweet } = require("../services/xService");
+const axios = require("axios");
 const router = express.Router();
 const multer = require("multer");
 const upload = multer({ dest: "uploads/" }); // Files will be stored in 'uploads/' directory
+const { authenticateRequest, getOAuthHeader } = require("../config/auth"); 
 
+// ✅ Fix: Ensure BASE_URL is properly imported
+const BASE_URL = process.env.BASE_URL;
+const BEARER_TOKEN = process.env.BEARER_TOKEN;
 
-const retryLimit = 3;
-const retryDelay = (attempt) => Math.min(2000 * attempt, 10000); // Exponential backoff
+// ✅ **Sanitize Text Function**
+const sanitizeText = (text) => text.replace(/[\n\t\r]/g, " ").trim();
 
 // ✅ New Ping Endpoint to Keep the App Active
+// ✅ Ping Endpoint
 router.get("/ping", (req, res) => {
     console.log("✅ Ping request received - Keeping app active!");
     res.status(200).json({ message: "App is awake and running!" });
@@ -32,20 +37,29 @@ router.post("/process-tweet/:id", async (req, res) => {
     }
 });
 
-// ✅ Route for Quote Tweet
-router.post("/quote-tweet/:id", async (req, res) => {
-    try {
-        const { comment } = req.body;
-        if (!comment) {
-            return res.status(400).json({ error: "Comment is required for quote tweet" });
-        }
+// ✅ **Quote Tweet Route**
 
-        const result = await quoteTweet(req.params.id, comment);
-        res.json({ message: "Quote Tweet Posted Successfully!", data: result });
+router.post("/quote-tweet/:id", authenticateRequest, async (req, res) => {
+    try {
+        let { comment } = req.body;
+        comment = comment.replace(/[\n\t\r]/g, " ").trim(); // ✅ Sanitize input
+
+        const url = `${BASE_URL}/tweets`;
+        const headers = getOAuthHeader(url, "POST"); // ✅ Fix: Use getOAuthHeader()
+
+        const response = await axios.post(
+            url,
+            { text: `${comment} https://twitter.com/user/status/${req.params.id}` },
+            { headers }
+        );
+
+        res.json({ message: "Quote Tweet Posted Successfully!", data: response.data });
     } catch (error) {
-        res.status(500).json({ error: "Failed to post quote tweet", details: error.message });
+        console.error("❌ Quote Tweet Error:", error.response?.data || error.message);
+        res.status(400).json({ error: "Invalid quote tweet format." });
     }
 });
+
 
 
 // ✅ Route to Create a Post with Media
@@ -63,6 +77,22 @@ router.post("/create-post-with-media", upload.single("media"), async (req, res) 
         res.json(post);
     } catch (error) {
         res.status(500).json({ error: "Failed to create post with media", details: error.message });
+    }
+});
+
+// ✅ Image Upload Route
+router.post("/upload-media", async (req, res) => {
+    const { imageUrl } = req.body;
+
+    if (!imageUrl) {
+        return res.status(400).json({ error: "No image URL provided" });
+    }
+
+    try {
+        const uploadResponse = await uploadMedia(imageUrl);
+        res.json(uploadResponse);
+    } catch (error) {
+        res.status(500).json({ error: "Image upload failed", details: error.message });
     }
 });
 
@@ -87,15 +117,11 @@ router.post("/process-tweet/:id", async (req, res) => {
     }
 });
 
-router.post("/repost-tweet/:id", async (req, res) => {
+// ✅ **Retweet Endpoint**
+router.post("/retweet/:id", authenticateRequest, async (req, res) => {
     const tweetId = req.params.id;
-
-    try {
-        await repostTweet(tweetId);
-        res.json({ message: "Tweet Reposted Successfully!" });
-    } catch (error) {
-        res.status(500).json({ error: "Failed to repost tweet", details: error.message });
-    }
+    const result = await retweet(tweetId);
+    res.json(result);
 });
 
 
