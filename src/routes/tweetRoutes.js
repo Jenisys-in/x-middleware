@@ -39,44 +39,74 @@ router.post("/process-tweet/:id", async (req, res) => {
 
 // ✅ **Quote Tweet Route**
 
+// ✅ Route for Quote Tweet (Restored v1.01 behavior)
 router.post("/quote-tweet/:id", authenticateRequest, async (req, res) => {
     try {
-        let { comment } = req.body;
-        comment = comment.replace(/[\n\t\r]/g, " ").trim(); // ✅ Sanitize input
+        const { comment } = req.body;
+        if (!comment) {
+            return res.status(400).json({ error: "Comment is required for quote tweet" });
+        }
 
-        const url = `${BASE_URL}/tweets`;
-        const headers = getOAuthHeader(url, "POST"); // ✅ Fix: Use getOAuthHeader()
+        // ✅ Calls the v1.01 `quoteTweet` function
+        const result = await quoteTweet(req.params.id, comment);
 
-        const response = await axios.post(
-            url,
-            { text: `${comment} https://twitter.com/user/status/${req.params.id}` },
-            { headers }
-        );
-
-        res.json({ message: "Quote Tweet Posted Successfully!", data: response.data });
+        res.json({ message: "Quote Tweet Posted Successfully!", data: result });
     } catch (error) {
-        console.error("❌ Quote Tweet Error:", error.response?.data || error.message);
-        res.status(400).json({ error: "Invalid quote tweet format." });
+        res.status(500).json({ error: "Failed to post quote tweet", details: error.message });
     }
 });
+
+
 
 
 
 // ✅ Route to Create a Post with Media
 
 
-router.post("/create-post-with-media", upload.single("media"), async (req, res) => {
-    try {
-        const { text } = req.body;
-        if (!req.file) {
-            return res.status(400).json({ error: "No media file uploaded" });
-        }
+router.post("/create-post-with-media", authenticateRequest, async (req, res) => {
+    const { text, media_id } = req.body;
 
-        const mediaPath = req.file.path; // Get uploaded file path
-        const post = await createPost(text, mediaPath);
-        res.json(post);
+    if (!text) {
+        return res.status(400).json({ error: "Tweet text is required" });
+    }
+
+    if (!media_id) {
+        return res.status(400).json({ error: "Media ID is required" });
+    }
+
+    try {
+        const response = await axios.post(
+            `${BASE_URL}/tweets`,
+            { text, media: { media_ids: [media_id] } },
+            { headers: getOAuthHeader(`${BASE_URL}/tweets`, "POST") }
+        );
+
+        res.json({ message: "Tweet with media posted successfully!", tweet_id: response.data.data.id });
     } catch (error) {
-        res.status(500).json({ error: "Failed to create post with media", details: error.message });
+        console.error("❌ Post Tweet with Media Error:", error.response?.data || error.message);
+        res.status(500).json({ error: "Failed to post tweet with media.", details: error.response?.data || error.message });
+    }
+});
+
+// Ensure all legacy endpoints enforce authentication
+router.post("/legacy-create-post", authenticateRequest, async (req, res) => {
+    const { text } = req.body;
+
+    if (!text) {
+        return res.status(400).json({ error: "Tweet text is required" });
+    }
+
+    try {
+        const response = await axios.post(
+            `${BASE_URL}/tweets`,
+            { text },
+            { headers: getOAuthHeader(`${BASE_URL}/tweets`, "POST") }
+        );
+
+        res.json({ message: "Tweet Posted Successfully!", tweet_id: response.data.data.id });
+    } catch (error) {
+        console.error("❌ Post Tweet Error:", error.response?.data || error.message);
+        res.status(500).json({ error: "Failed to post tweet.", details: error.response?.data || error.message });
     }
 });
 
@@ -125,16 +155,26 @@ router.post("/retweet/:id", authenticateRequest, async (req, res) => {
 });
 
 
-// ✅ Route to Create a New Post
-router.post("/create-post", async (req, res) => {
-    const { text, imageUrl } = req.body;
+router.post("/create-post", authenticateRequest, async (req, res) => {
+    const { text } = req.body;
+
+    if (!text) {
+        return res.status(400).json({ error: "Tweet text is required" });
+    }
 
     try {
-        const response = await createPost(text, imageUrl);
-        res.json(response);
+        const response = await axios.post(
+            `${BASE_URL}/tweets`,
+            { text },
+            { headers: getOAuthHeader(`${BASE_URL}/tweets`, "POST") }
+        );
+
+        res.json({ message: "Tweet Posted Successfully!", tweet_id: response.data.data.id });
     } catch (error) {
-        res.status(500).json({ error: "Failed to create post", details: error.message });
+        console.error("❌ Post Tweet Error:", error.response?.data || error.message);
+        res.status(500).json({ error: "Failed to post tweet.", details: error.response?.data || error.message });
     }
 });
+
 
 module.exports = router;

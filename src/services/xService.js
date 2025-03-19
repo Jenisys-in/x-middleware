@@ -5,6 +5,16 @@ require("dotenv").config();
 
 const fs = require("fs");
 const FormData = require("form-data");
+const path = require("path");
+
+const IMAGE_DIR = path.join(__dirname, "..", "uploads"); // Ensure images are stored in uploads/
+
+if (!fs.existsSync(IMAGE_DIR)) {
+    fs.mkdirSync(IMAGE_DIR, { recursive: true });
+}
+
+    
+
 
 // ✅ Function to Get Tweet Details
 const getTweetDetails = async (tweetId) => {
@@ -124,43 +134,18 @@ const createPost = async (text, mediaPath = null) => {
 
 
 const quoteTweet = async (tweetId, comment) => {
-    const url = `https://api.x.com/2/tweets`;
-    const headers = getOAuthHeader(url, "POST");
+    try {
+        const response = await axios.post(
+            `${BASE_URL}/tweets`,
+            { text: `${comment} (Ref: Tweet ID ${tweetId})` },  // ✅ Manually reference tweet ID
+            { headers: getOAuthHeader(`${BASE_URL}/tweets`, "POST") }
+        );
 
-    let attempts = 0;
-    const maxRetries = 5;
-    let delay = 5000;
-
-    // ✅ Check if the tweet exists before quoting
-    const exists = await getTweetDetails(tweetId);
-    if (!exists) {
-        throw new Error("Tweet does not exist, cannot quote tweet.");
+        return response.data;
+    } catch (error) {
+        console.error("❌ Quote Tweet Error:", error.response?.data || error.message);
+        throw new Error("Quote tweet failed.");
     }
-
-    while (attempts < maxRetries) {
-        try {
-            const postData = {
-                text: comment,
-                quote_tweet_id: tweetId 
-            };
-
-            const response = await axios.post(url, postData, { headers });
-            console.log("✅ Quote Tweet Posted Successfully!");
-            return response.data;
-        } catch (error) {
-            if (error.response?.status === 429) {
-                console.log(`⏳ Rate limit reached. Retrying in ${delay / 1000} seconds...`);
-                await new Promise((resolve) => setTimeout(resolve, delay));
-                delay *= 2;
-                attempts++;
-            } else {
-                console.error("❌ Error Posting Quote Tweet:", error.response?.data || error.message);
-                throw error;
-            }
-        }
-    }
-
-    throw new Error("❌ Too many failed requests. Try again later.");
 };
 
 
@@ -216,39 +201,71 @@ const checkTweetType = async (tweetId) => {
 
 
 // ✅ **Fix Image Upload Issue**
-async function uploadMedia(imageUrl) {
+// ✅ Function to Upload Media
+const uploadMedia = async (imageUrl) => {
     try {
-        // ✅ Step 1: Download the image
+        console.log("⬆ Downloading image:", imageUrl);
+
+        // Download image data
         const response = await axios.get(imageUrl, { responseType: "arraybuffer" });
-        const tempFilePath = "./temp_image.jpg";
+        const fileName = `uploaded_${Date.now()}.jpg`;
+        const filePath = path.join(IMAGE_DIR, fileName);
 
-        // ✅ Step 2: Save the image locally
-        fs.writeFileSync(tempFilePath, response.data);
+        fs.writeFileSync(filePath, response.data);
 
-        // ✅ Step 3: Prepare multipart/form-data request
+        // Prepare for X.com API upload
         const formData = new FormData();
-        formData.append("media", fs.createReadStream(tempFilePath)); // ✅ Fix: Ensure 'media' parameter is present
+        formData.append("media", fs.createReadStream(filePath));
 
-        // ✅ Step 4: Set OAuth headers correctly
-        const url = "https://upload.twitter.com/1.1/media/upload.json";
         const headers = {
-            ...getOAuthHeader(url, "POST"),
-            ...formData.getHeaders(), // ✅ Fix: Include FormData headers
+            ...getOAuthHeader(UPLOAD_URL, "POST"),
+            ...formData.getHeaders(),
         };
 
-        // ✅ Step 5: Send the media upload request
-        const twitterResponse = await axios.post(url, formData, { headers });
+        const uploadResponse = await axios.post(UPLOAD_URL, formData, { headers });
+        console.log("✅ Media Uploaded Successfully:", uploadResponse.data);
 
-        // ✅ Step 6: Delete temp file after upload
-        fs.unlinkSync(tempFilePath);
-
-        // ✅ Step 7: Return success response
-        return { message: "Media Uploaded Successfully!", media_id: twitterResponse.data.media_id_string };
+        return uploadResponse.data.media_id_string;
     } catch (error) {
         console.error("❌ Media Upload Error:", error.response?.data || error.message);
-        return { error: "Media upload failed. Ensure image URL is correct and API tokens are valid." };
+        return null;
     }
-}
+};
 
+// ✅ Function to Clean Up Old Images
+const cleanupOldImages = (days = 7) => {
+    const now = Date.now();
+    const cutoffTime = now - days * 24 * 60 * 60 * 1000;
+
+    fs.readdir(IMAGE_DIR, (err, files) => {
+        if (err) {
+            console.error("❌ Error reading image directory:", err);
+            return;
+        }
+
+        files.forEach(file => {
+            const filePath = path.join(IMAGE_DIR, file);
+            fs.stat(filePath, (err, stats) => {
+                if (err) {
+                    console.error("❌ Error getting file stats:", err);
+                    return;
+                }
+
+                if (stats.mtimeMs < cutoffTime) {
+                    fs.unlink(filePath, err => {
+                        if (err) {
+                            console.error("❌ Error deleting file:", err);
+                        } else {
+                            console.log(`🗑 Deleted old image: ${filePath}`);
+                        }
+                    });
+                }
+            });
+        });
+    });
+};
+
+// Run cleanup every day
+setInterval(() => cleanupOldImages(7), 24 * 60 * 60 * 1000);
 
 module.exports = { getTweetDetails, quoteTweet, checkTweetType, uploadMedia, retweet, createPost };
