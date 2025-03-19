@@ -133,11 +133,21 @@ const createPost = async (text, mediaPath = null) => {
 };
 
 
-const quoteTweet = async (tweetId, comment) => {
+const quoteTweet = async (tweetId, comment, media_id) => {
     try {
+        let tweetData = {
+            quote_tweet_id: tweetId,  // ✅ Uses X.com's built-in quote system
+            text: comment,            // ✅ Only the quote text, nothing else
+        };
+
+        // ✅ If media is provided, attach it
+        if (media_id) {
+            tweetData.media = { media_ids: [media_id] };
+        }
+
         const response = await axios.post(
             `${BASE_URL}/tweets`,
-            { text: `${comment} (Ref: Tweet ID ${tweetId})` },  // ✅ Manually reference tweet ID
+            tweetData,
             { headers: getOAuthHeader(`${BASE_URL}/tweets`, "POST") }
         );
 
@@ -147,7 +157,6 @@ const quoteTweet = async (tweetId, comment) => {
         throw new Error("Quote tweet failed.");
     }
 };
-
 
 
 // ✅ Function to Check Tweet Type (Avoids Reposts/Quotes)

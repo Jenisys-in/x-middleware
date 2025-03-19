@@ -42,13 +42,14 @@ router.post("/process-tweet/:id", async (req, res) => {
 // ✅ Route for Quote Tweet (Restored v1.01 behavior)
 router.post("/quote-tweet/:id", authenticateRequest, async (req, res) => {
     try {
-        const { comment } = req.body;
+        const { comment, media_id } = req.body;
+
         if (!comment) {
             return res.status(400).json({ error: "Comment is required for quote tweet" });
         }
 
-        // ✅ Calls the v1.01 `quoteTweet` function
-        const result = await quoteTweet(req.params.id, comment);
+        // ✅ Calls `quoteTweet` from xService.js, ensuring only the comment is used
+        const result = await quoteTweet(req.params.id, comment, media_id);
 
         res.json({ message: "Quote Tweet Posted Successfully!", data: result });
     } catch (error) {
