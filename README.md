@@ -25,7 +25,7 @@ A lightweight middleware web service designed to interface Make.com with `x.com`
 ---
 
 ## 📁 Folder Structure
-
+```text
 ├── index.js # Core server script (Express) ├── routes/ │ └── forward.js # Main endpoint to handle and proxy requests ├── utils/ │ └── transform.js # Optional: Modify request/response data ├── .env # API keys, secrets └── README.md
 
 
